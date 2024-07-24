@@ -1,0 +1,96 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: echo Hello, world!
+  displayName: 'Run a one-line script'
+
+- script: |
+    echo Add other tasks to build, test, and deploy your project.
+    echo See https://aka.ms/yaml
+  displayName: 'Run a multi-line script'
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'  # Utilise une VM Ubuntu
+
+variables:
+  androidSdkRoot: '/usr/local/lib/android/sdk'
+  keystoreFile: 'keystore.jks'
+  keystorePassword: $(KeystorePassword)
+  keyAlias: $(KeystoreAlias)
+  keyPassword: $(KeystoreKeyPassword)
+  googleServicesJson: 'google-services.json'
+
+steps:
+- script: |
+    sudo apt-get update
+    sudo apt-get install -y openjdk-11-jdk wget unzip
+  displayName: 'Install JDK and tools'
+
+- script: |
+    mkdir -p ${ANDROID_SDK_ROOT} && cd ${ANDROID_SDK_ROOT}
+    wget https://dl.google.com/android/repository/commandlinetools-linux-7302050_latest.zip -O commandlinetools.zip
+    unzip commandlinetools.zip -d ${ANDROID_SDK_ROOT}/cmdline-tools
+    rm commandlinetools.zip
+    mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools/tools
+    mv ${ANDROID_SDK_ROOT}/cmdline-tools/* ${ANDROID_SDK_ROOT}/cmdline-tools/tools
+    export PATH=${PATH}:${ANDROID_SDK_ROOT}/cmdline-tools/tools/bin
+    yes | sdkmanager --sdk_root=${ANDROID_SDK_ROOT} "platform-tools" "platforms;android-30" "build-tools;30.0.3"
+  displayName: 'Install Android SDK'
+
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.x'
+    addToPath: true
+
+- task: UseNode@2
+  inputs:
+    versionSpec: '14.x'
+    checkLatest: true
+
+- task: DownloadSecureFile@1
+  name: downloadKeystore
+  inputs:
+    secureFile: $(keystoreFile)
+
+- task: DownloadSecureFile@1
+  name: downloadGoogleServicesJson
+  inputs:
+    secureFile: $(googleServicesJson)
+
+- script: |
+    mkdir -p ~/.android
+    cp $(downloadKeystore.secureFilePath) ~/.android/debug.keystore
+  displayName: 'Set up Android keystore'
+
+- script: |
+    mkdir -p app
+    cp $(downloadGoogleServicesJson.secureFilePath) app/google-services.json
+  displayName: 'Set up google-services.json'
+
+- task: Gradle@2
+  inputs:
+    gradleWrapperFile: 'gradlew'
+    tasks: 'assembleDebug'
+    options: '-Pandroid.injected.signing.store.file=$(downloadKeystore.secureFilePath) -Pandroid.injected.signing.store.password=$(keystorePassword) -Pandroid.injected.signing.key.alias=$(keyAlias) -Pandroid.injected.signing.key.password=$(keyPassword)'
+
+- task: CopyFiles@2
+  inputs:
+    contents: 'app/build/outputs/apk/debug/app-debug.apk'
+    targetFolder: '$(Build.ArtifactStagingDirectory)'
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
